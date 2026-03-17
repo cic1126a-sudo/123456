@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>吃豆人小游戏 - 龟速幽灵版</title>
+    <style>
+        body {
+            background-color: #222;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+        }
+        canvas {
+            background-color: black;
+            border: 4px solid #1919A6;
+            border-radius: 5px;
+            box-shadow: 0 0 20px rgba(25, 25, 166, 0.5);
+        }
+        #score-board {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #FFEF00;
+        }
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 36px;
+            font-weight: bold;
+            color: red;
+            text-align: center;
+            text-shadow: 2px 2px 0 #000;
+            display: none;
+        }
+        .instructions {
+            margin-top: 15px;
+            color: #aaa;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="score-board">
+            <span>SCORE: <span id="score">0</span></span>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="message">GAME OVER</div>
+    </div>
+    
+    <div class="instructions">
+        🕹️ 控制方法: 使用 <b>方向键 (↑ ↓ ← →)</b> 或 <b>W A S D</b> 移动<br>
+        吃掉所有白色的豆子即可获胜，注意躲避幽灵！
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const messageEl = document.getElementById('message');
+
+    // ==========================================
+    // 基础速度设置
+    const TILE_SIZE = 24;
+    const PACMAN_SPEED = 2; // 吃豆人速度
+    const GHOST_SPEED = 1;  // 幽灵基础速度
+    // ==========================================
+
+    const initialMap = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+        [1,0,1,1,0,1,1,1,0,1,0,1,1,1,0,1,1,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,0,1,1,0,1,0,1,1,1,1,1,0,1,0,1,1,0,1],
+        [1,0,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1],
+        [1,1,1,1,0,1,1,1,2,1,2,1,1,1,0,1,1,1,1],
+        [2,2,2,1,0,1,2,2,2,2,2,2,2,1,0,1,2,2,2],
+        [1,1,1,1,0,1,2,1,1,2,1,1,2,1,0,1,1,1,1],
+        [2,2,2,2,0,2,2,1,2,2,2,1,2,2,0,2,2,2,2], // 幽灵出生点
+        [1,1,1,1,0,1,2,1,1,1,1,1,2,1,0,1,1,1,1],
+        [2,2,2,1,0,1,2,2,2,2,2,2,2,1,0,1,2,2,2],
+        [1,1,1,1,0,1,2,1,1,1,1,1,2,1,0,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+        [1,0,1,1,0,1,1,1,0,1,0,1,1,1,0,1,1,0,1],
+        [1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1],
+        [1,1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,1,1],
+        [1,0,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1],
+        [1,0,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    let map = [];
+    let score = 0;
+    let totalPellets = 0;
+    let gameOver = false;
+    let animationId;
+    let frameCount = 0; // 新增：全局帧计数器
+
+    canvas.width = initialMap[0].length * TILE_SIZE;
+    canvas.height = initialMap.length * TILE_SIZE;
+
+    // 方向定义
+    const DIRS = {
+        RIGHT: { x: 1, y: 0, angle: 0 },
+        DOWN:  { x: 0, y: 1, angle: Math.PI / 2 },
+        LEFT:  { x: -1, y: 0, angle: Math.PI },
+        UP:    { x: 0, y: -1, angle: -Math.PI / 2 },
+        STOP:  { x: 0, y: 0, angle: 0 }
+    };
+
+    class Entity {
+        constructor(x, y, speed) {
+            this.x = x * TILE_SIZE;
+            this.y = y * TILE_SIZE;
+            this.speed = speed;
+            this.dir = DIRS.STOP;
+            this.nextDir = DIRS.STOP;
+        }
+
+        isCentered() {
+            return this.x % TILE_SIZE === 0 && this.y % TILE_SIZE === 0;
+        }
+
+        getGridPos() {
+            return {
+                c: Math.floor(this.x / TILE_SIZE),
+                r: Math.floor(this.y / TILE_SIZE)
+            };
+        }
+
+        isValidMove(direction) {
+            const pos = this.getGridPos();
+            const nextR = pos.r + direction.y;
+            const nextC = pos.c + direction.x;
+            if (nextC < 0 || nextC >= map[0].length) return true;
+            return map[nextR] && map[nextR][nextC] !== 1;
+        }
+
+        move() {
+            if (this.isCentered()) {
+                if (this.isValidMove(this.nextDir)) {
+                    this.dir = this.nextDir;
+                }
+                if (!this.isValidMove(this.dir)) {
+                    this.dir = DIRS.STOP;
+                }
+            }
+
+            this.x += this.dir.x * this.speed;
+            this.y += this.dir.y * this.speed;
+
+            if (this.x < -TILE_SIZE/2) this.x = canvas.width - TILE_SIZE/2;
+            if (this.x > canvas.width - TILE_SIZE/2) this.x = -TILE_SIZE/2;
+        }
+    }
+
+    class Pacman extends Entity {
+        constructor(x, y) {
+            super(x, y, PACMAN_SPEED);
+            this.mouthOpen = 0;
+            this.mouthDir = 1;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2);
+            ctx.rotate(this.dir.angle || this.nextDir.angle);
+            
+            this.mouthOpen += 0.15 * this.mouthDir;
+            if (this.mouthOpen >= 0.25 || this.mouthOpen <= 0) {
+                this.mouthDir *= -1;
+            }
+
+            ctx.beginPath();
+            ctx.arc(0, 0, TILE_SIZE/2 - 2, this.mouthOpen * Math.PI, (2 - this.mouthOpen) * Math.PI);
+            ctx.lineTo(0, 0);
+            ctx.fillStyle = '#FFEF00';
+            ctx.fill();
+            ctx.closePath();
+            ctx.restore();
+        }
+
+        eat() {
+            if (this.isCentered()) {
+                const pos = this.getGridPos();
+                if (map[pos.r][pos.c] === 0) {
+                    map[pos.r][pos.c] = 2; 
+                    score += 10;
+                    scoreEl.innerText = score;
+                    totalPellets--;
+                    if (totalPellets === 0) {
+                        endGame("YOU WIN!", "#0f0");
+                    }
+                }
+            }
+        }
+    }
+
+    class Ghost extends Entity {
+        constructor(x, y, color) {
+            super(x, y, GHOST_SPEED);
+            this.color = color;
+            this.dir = DIRS.UP; 
+            this.nextDir = DIRS.UP;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2);
+            
+            ctx.beginPath();
+            ctx.arc(0, -2, TILE_SIZE/2 - 2, Math.PI, 0);
+            ctx.lineTo(TILE_SIZE/2 - 2, TILE_SIZE/2 - 2);
+            ctx.lineTo(TILE_SIZE/4, TILE_SIZE/2 - 5);
+            ctx.lineTo(0, TILE_SIZE/2 - 2);
+            ctx.lineTo(-TILE_SIZE/4, TILE_SIZE/2 - 5);
+            ctx.lineTo(-TILE_SIZE/2 + 2, TILE_SIZE/2 - 2);
+            
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.closePath();
+
+            ctx.beginPath();
+            ctx.fillStyle = 'white';
+            ctx.arc(-4, -4, 3, 0, Math.PI*2);
+            ctx.arc(4, -4, 3, 0, Math.PI*2);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.fillStyle = 'blue';
+            let eyeX = this.dir.x * 1.5;
+            let eyeY = this.dir.y * 1.5;
+            ctx.arc(-4 + eyeX, -4 + eyeY, 1.5, 0, Math.PI*2);
+            ctx.arc(4 + eyeX, -4 + eyeY, 1.5, 0, Math.PI*2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        updateAI() {
+            if (this.isCentered()) {
+                const possibleDirs = [];
+                const allDirs = [DIRS.UP, DIRS.RIGHT, DIRS.DOWN, DIRS.LEFT];
+                
+                for (let d of allDirs) {
+                    const isOpposite = (d.x === -this.dir.x && d.y === -this.dir.y) && (this.dir !== DIRS.STOP);
+                    if (!isOpposite && this.isValidMove(d)) {
+                        possibleDirs.push(d);
+                    }
+                }
+
+                if (possibleDirs.length === 0) {
+                    this.nextDir = { x: -this.dir.x, y: -this.dir.y, angle: 0 };
+                } else {
+                    this.nextDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
+                }
+            }
+        }
+    }
+
+    let pacman;
+    let ghosts = [];
+
+    function initGame() {
+        map = initialMap.map(row => [...row]);
+        score = 0;
+        totalPellets = 0;
+        gameOver = false;
+        frameCount = 0;
+        scoreEl.innerText = score;
+        messageEl.style.display = 'none';
+
+        for (let r = 0; r < map.length; r++) {
+            for (let c = 0; c < map[r].length; c++) {
+                if (map[r][c] === 0) totalPellets++;
+            }
+        }
+
+        pacman = new Pacman(9, 15);
+        
+        ghosts = [
+            new Ghost(8, 9, '#FF0000'), 
+            new Ghost(9, 9, '#FFB8FF'), 
+            new Ghost(10, 9, '#00FFFF'),
+            new Ghost(9, 10, '#FFB852') 
+        ];
+
+        window.addEventListener('keydown', (e) => {
+            if (gameOver) return;
+            switch(e.key) {
+                case 'ArrowUp': case 'w': case 'W': pacman.nextDir = DIRS.UP; break;
+                case 'ArrowDown': case 's': case 'S': pacman.nextDir = DIRS.DOWN; break;
+                case 'ArrowLeft': case 'a': case 'A': pacman.nextDir = DIRS.LEFT; break;
+                case 'ArrowRight': case 'd': case 'D': pacman.nextDir = DIRS.RIGHT; break;
+            }
+        });
+
+        gameLoop();
+    }
+
+    function drawMap() {
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (let r = 0; r < map.length; r++) {
+            for (let c = 0; c < map[r].length; c++) {
+                if (map[r][c] === 1) {
+                    ctx.fillStyle = '#1919A6';
+                    ctx.fillRect(c * TILE_SIZE + 2, r * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                } else if (map[r][c] === 0) {
+                    ctx.fillStyle = '#FFB8AE';
+                    ctx.beginPath();
+                    ctx.arc(c * TILE_SIZE + TILE_SIZE/2, r * TILE_SIZE + TILE_SIZE/2, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+    }
+
+    function checkCollision() {
+        for (let ghost of ghosts) {
+            let dist = Math.hypot(pacman.x - ghost.x, pacman.y - ghost.y);
+            if (dist < TILE_SIZE * 0.8) { 
+                endGame("GAME OVER", "red");
+            }
+        }
+    }
+
+    function endGame(text, color) {
+        gameOver = true;
+        messageEl.innerText = text + "\n(按F5重新开始)";
+        messageEl.style.color = color;
+        messageEl.style.display = 'block';
+        cancelAnimationFrame(animationId);
+    }
+
+    function gameLoop() {
+        if (gameOver) return;
+
+        frameCount++; // 更新帧数
+
+        drawMap();
+
+        pacman.move();
+        pacman.eat();
+        pacman.draw();
+
+        for (let ghost of ghosts) {
+            // ==========================================
+            // 控制幽灵极其缓慢的移动逻辑
+            // 如果想更慢，把下面的 2 改成 3 或者 4（数字越大越慢）
+            if (frameCount % 2 === 0) { 
+                ghost.updateAI();
+                ghost.move();
+            }
+            // ==========================================
+            ghost.draw(); // 但保证每帧都在绘制，避免闪烁
+        }
+
+        checkCollision();
+
+        animationId = requestAnimationFrame(gameLoop);
+    }
+
+    initGame();
+
+</script>
+</body>
+</html>
